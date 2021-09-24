@@ -163,8 +163,11 @@ mod tests {
 
     #[test]
     fn standard_lines() {
-        diff::lines("test_files/std_A.txt".as_ref());
-        diff::lines("test_files/std_B.txt".as_ref());
+        let lines_a = diff::lines("test_files/std_A.txt".as_ref());
+        let lines_b = diff::lines("test_files/std_B.txt".as_ref());
+
+        assert_eq!(lines_a.len(), 24);
+        assert_eq!(lines_b.len(), 29);
     }
 
     #[test]
