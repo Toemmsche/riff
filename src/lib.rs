@@ -1,9 +1,43 @@
-pub mod io {
-    use std::path::Path;
+pub mod riff {
+    use std::cmp::max;
     use std::fs::read_to_string;
+    use std::path::Path;
 
-    /// The newline character that signals the end of a line.
-    const NEWLINE: &str = "\n";
+    /// The number of unchanged lines (if they exist) at the start and end
+    /// of a hunk that cannot be part of any other hunk.
+    pub const HUNK_RADIUS: usize = 3;
+
+    /// A wrapper for an index pair. For two sequences A and B, the items at
+    /// the respective indices should be (partially) equal.
+    #[derive(Debug)]
+    pub struct LcsItem {
+        pub index_a: usize,
+        pub index_b: usize,
+    }
+
+    #[derive(Debug)]
+    pub enum EditType {
+        INSERT,
+        DELETE,
+        NIL,
+    }
+
+    /// An potentially changed line.
+    pub struct DeltaLine {
+        pub edit_type: EditType,
+        pub line: String,
+    }
+
+
+    /// A hunk that groups multiple (changed) lines that are though to be part
+    /// the same edit process.
+    #[derive(Debug)]
+    pub struct Hunk {
+        begin_a: usize,
+        count_a: usize,
+        begin_b: usize,
+        count_b: usize,
+    }
 
     /// Read a file and transform its content into a sequence of lines.
     /// A line ends whenever the newline character is found and can be empty.
@@ -11,76 +45,9 @@ pub mod io {
         // Ignore newline at the end for now...
         read_to_string(path)
             .expect("Unable to read file")
-            .split(NEWLINE)
-            .map(|str| String::from(str))
+            .lines()
+            .map(|str| String::from(str).replace("\t", ""))
             .collect::<Vec<String>>()
-    }
-}
-
-#[cfg(test)]
-mod io_tests {
-    use crate::io;
-
-    #[test]
-    fn test_dummy() {
-        assert_eq!(4, 2 * 2);
-    }
-
-
-    #[test]
-    fn standard_lines() {
-        io::lines("test_files/std_A.txt".as_ref());
-        io::lines("test_files/std_B.txt".as_ref());
-    }
-}
-
-#[cfg(test)]
-pub mod lcs_tests {
-    use crate::diff;
-
-    #[test]
-    pub fn small() {
-        let seq_a = "science"
-            .split("")
-            .map(|str| String::from(str))
-            .filter(|str| !str.is_empty())
-            .collect::<Vec<String>>();
-        let seq_b = "incentive"
-            .split("")
-            .map(|str| String::from(str))
-            .filter(|str| !str.is_empty())
-            .collect::<Vec<String>>();
-
-
-        let lcs = diff::lcs(&seq_a, &seq_b);
-        assert_eq!(lcs.len(), 4);
-
-        for lcs_item in lcs {
-            assert_eq!(seq_a[lcs_item.index_a as usize], seq_b[lcs_item.index_b as usize]);
-        }
-    }
-}
-
-pub mod diff {
-    use std::cmp::max;
-
-    /// A wrapper for an index pair. For two sequences A and B, the items at
-    /// the respective indices should be (partially) equal.
-    #[derive(Debug)]
-    pub struct LcsItem {
-        pub index_a: i32,
-        pub index_b: i32,
-    }
-
-    impl PartialEq for LcsItem {
-        fn eq(&self, other: &LcsItem) -> bool {
-            return self.index_a == other.index_a
-                && self.index_b == other.index_b;
-        }
-
-        fn ne(&self, other: &LcsItem) -> bool {
-            return !(self == other);
-        }
     }
 
     /// Compute the longest common subsequence between two string sequences A and B.
@@ -108,7 +75,7 @@ pub mod diff {
         let mut res = Vec::new();
         while r > 0 && c > 0 {
             if seq_a[r - 1] == seq_b[c - 1] {
-                res.push(LcsItem { index_a: (r - 1) as i32, index_b: (c - 1) as i32 });
+                res.push(LcsItem { index_a: r - 1, index_b: c - 1 });
                 r -= 1;
                 c -= 1;
             } else if dp[r][c] == dp[r - 1][c] {
@@ -121,77 +88,100 @@ pub mod diff {
         res
     }
 
-    #[derive(Debug)]
-    pub enum EditType {
-        INSERT,
-        DELETE,
-        NIL,
-    }
-
-    /// An potentially changed line.
-    #[derive(Debug)]
-    pub struct DeltaLine {
-        pub edit_type: EditType,
-        pub line: String,
-    }
-
     impl DeltaLine {
         pub fn to_string(&self) -> String {
-            // TODO
-            "".to_string()
+            let mut prefix = match self.edit_type {
+                EditType::DELETE => "-".to_string(),
+                EditType::INSERT => "+".to_string(),
+                EditType::NIL => " ".to_string(),
+            };
+            prefix.push_str(&self.line);
+            prefix
         }
     }
 
+    /// Create a diff from two string sequences. The diff uses the LCS among the sequences and
+    /// marks inserted and deleted lines.
     pub fn diff(seq_a: &Vec<String>, seq_b: &Vec<String>) -> Vec<DeltaLine> {
         let mut lcs = lcs(seq_a, seq_b);
         let mut res = Vec::new();
 
-        // insert dummies
-        lcs.insert(0, LcsItem { index_a: -1, index_b: -1 });
+        // insert dummy at the end
+        lcs.push(LcsItem { index_a: seq_a.len(), index_b: seq_b.len() });
 
-        lcs.push(LcsItem { index_a: seq_a.len() as i32, index_b: seq_b.len() as i32 });
-
-        println!("{:?}", lcs);
-        for i in 1..lcs.len() {
-            if lcs[i].index_a != lcs[i - 1].index_a {
+        let mut next_a = 0;
+        let mut next_b = 0;
+        for i in 0..lcs.len() {
+            if lcs[i].index_a != next_a {
                 // Deletions
-                for line in &seq_a[((lcs[i - 1].index_a + 1) as usize)..(lcs[i].index_a as usize)] {
+                for line in &seq_a[next_a..lcs[i].index_a] {
                     res.push(DeltaLine {
                         edit_type: EditType::DELETE,
                         line: line.clone(),
                     })
                 }
             }
-            if lcs[i].index_b != lcs[i - 1].index_b {
+            if lcs[i].index_b != next_b {
                 // Deletions
-                for line in &seq_b[((lcs[i - 1].index_b + 1) as usize)..(lcs[i].index_b as usize)] {
+                for line in &seq_b[next_b..lcs[i].index_b] {
                     res.push(DeltaLine {
                         edit_type: EditType::INSERT,
                         line: line.clone(),
                     })
                 }
             }
-            if(i < lcs.len() - 1) {
+            if i < lcs.len() - 1 {
                 res.push(DeltaLine {
                     edit_type: EditType::NIL,
-                    line: seq_a[lcs[i].index_a as usize].clone(),
+                    line: seq_a[lcs[i].index_a].clone(),
                 });
             }
+            next_a = lcs[i].index_a + 1;
+            next_b = lcs[i].index_b + 1;
         }
         res
     }
+}
 
-    /// A hunk that groups multiple (changed) lines that are though to be part
-    /// the same edit process.
-    #[derive(Debug)]
-    pub struct Hunk {
-        begin_a: usize,
-        count_a: usize,
-        begin_b: usize,
-        count_b: usize,
+#[cfg(test)]
+mod tests {
+
+    use crate::riff;
+
+    #[test]
+    fn standard_lines() {
+        riff::lines("test_files/std_A.txt".as_ref());
+        riff::lines("test_files/std_B.txt".as_ref());
     }
 
-    /// The number of unchanged lines (if they exist) at the start and end
-    /// of a hunk that cannot be part of any other hunk.
-    const HUNK_RADIUS: usize = 3;
+    #[test]
+    pub fn small_lcs() {
+        let seq_a = "science"
+            .split("")
+            .map(|str| String::from(str))
+            .filter(|str| !str.is_empty())
+            .collect::<Vec<String>>();
+        let seq_b = "incentive"
+            .split("")
+            .map(|str| String::from(str))
+            .filter(|str| !str.is_empty())
+            .collect::<Vec<String>>();
+
+
+        let lcs = riff::lcs(&seq_a, &seq_b);
+        assert_eq!(lcs.len(), 4);
+
+        for lcs_item in lcs {
+            assert_eq!(seq_a[lcs_item.index_a], seq_b[lcs_item.index_b]);
+        }
+    }
+
+    #[test]
+    pub fn small_diff() {
+        let seq_a = riff::lines("test_files/std_A.txt".as_ref());
+        let seq_b = riff::lines("test_files/std_B.txt".as_ref());
+
+        let out = riff::diff(&seq_a, &seq_b).iter().map(|x| x.to_string()).collect::<Vec<String>>();
+        assert_eq!(out.len(), 35);
+    }
 }
