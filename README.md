@@ -1,5 +1,5 @@
 # riff
-Implementation of the GNU diff utility in Rust, mainly for practice purposes.
+Implementation of a small diff utility in Rust, mainly for practice purposes.
 
 ## Usage
 
