@@ -1,4 +1,4 @@
-pub mod riff {
+pub mod diff {
     use std::cmp::max;
     use std::fs::read_to_string;
     use std::path::Path;
@@ -100,6 +100,19 @@ pub mod riff {
         }
     }
 
+    pub trait DiffRep {
+        fn to_diff(&self) -> String;
+    }
+    impl DiffRep for Vec<DeltaLine> {
+        fn to_diff(&self) -> String {
+            self
+                .iter()
+                .map(|dl| dl.to_string())
+                .collect::<Vec<String>>()
+                .join("\n")
+        }
+    }
+
     /// Create a diff from two string sequences. The diff uses the LCS among the sequences and
     /// marks inserted and deleted lines.
     pub fn diff(seq_a: &Vec<String>, seq_b: &Vec<String>) -> Vec<DeltaLine> {
@@ -146,12 +159,12 @@ pub mod riff {
 #[cfg(test)]
 mod tests {
 
-    use crate::riff;
+    use crate::diff;
 
     #[test]
     fn standard_lines() {
-        riff::lines("test_files/std_A.txt".as_ref());
-        riff::lines("test_files/std_B.txt".as_ref());
+        diff::lines("test_files/std_A.txt".as_ref());
+        diff::lines("test_files/std_B.txt".as_ref());
     }
 
     #[test]
@@ -168,7 +181,7 @@ mod tests {
             .collect::<Vec<String>>();
 
 
-        let lcs = riff::lcs(&seq_a, &seq_b);
+        let lcs = diff::lcs(&seq_a, &seq_b);
         assert_eq!(lcs.len(), 4);
 
         for lcs_item in lcs {
@@ -178,10 +191,10 @@ mod tests {
 
     #[test]
     pub fn small_diff() {
-        let seq_a = riff::lines("test_files/std_A.txt".as_ref());
-        let seq_b = riff::lines("test_files/std_B.txt".as_ref());
+        let seq_a = diff::lines("test_files/std_A.txt".as_ref());
+        let seq_b = diff::lines("test_files/std_B.txt".as_ref());
 
-        let out = riff::diff(&seq_a, &seq_b).iter().map(|x| x.to_string()).collect::<Vec<String>>();
+        let out = diff::diff(&seq_a, &seq_b).iter().map(|x| x.to_string()).collect::<Vec<String>>();
         assert_eq!(out.len(), 35);
     }
 }

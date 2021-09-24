@@ -1,11 +1,20 @@
-use riff::riff;
+use riff::diff;
+use std::env;
+use riff::diff::DiffRep;
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
 
-    let lines_a = riff::lines("test_files/std_A.txt".as_ref());
-    let lines_b = riff::lines("test_files/std_B.txt".as_ref());
+    if args.len() < 3 {
+        println!("Please supply at least two file names");
+        return;
+    }
 
-    let delta = riff::diff(&lines_a, &lines_b);
+    let file_a = &args[1];
+    let file_b = &args[2];
 
-    println!("{}", );
+    let lines_a = diff::lines(file_a.as_ref());
+    let lines_b = diff::lines(file_b.as_ref());
+
+    println!("{}", diff::diff(&lines_a,&lines_b).to_diff());
 }
